@@ -637,7 +637,8 @@ object OpenID4VCI {
                 ?.toSet() ?: setOf()
         }
 
-        if (!supportedCredentialFormats.contains(credentialRequest.format))
+        // OID4VCI Draft 15+: format may be null (will be resolved from session)
+        if (credentialRequest.format != null && !supportedCredentialFormats.contains(credentialRequest.format))
             return CredentialRequestValidationResult(
                 success = false,
                 errorCode = CredentialErrorCode.unsupported_credential_format,

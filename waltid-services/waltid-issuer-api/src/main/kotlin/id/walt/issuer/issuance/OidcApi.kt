@@ -505,14 +505,38 @@ object OidcApi : CIProvider(), Klogging {
                         tokenKey = CI_TOKEN_KEY
                     )
 
-                    val credentialRequest = CredentialRequest.fromJSON(call.receive<JsonObject>())
+                    // OID4VCI Draft 15+ compatibility: handle missing format field
+                    // Use receiveText() to bypass Ktor content negotiation
+                    val requestBody = call.receiveText()
+                    val requestJsonElement = kotlinx.serialization.json.Json.parseToJsonElement(requestBody)
+                    val requestJson = requestJsonElement.jsonObject.toMutableMap()
+                    if (!requestJson.containsKey("format")) {
+                        requestJson["format"] = kotlinx.serialization.json.JsonNull
+                        logger.info { "OID4VCI Draft 15+: Added null format field to credential request" }
+                    }
+                    val rawCredentialRequest = CredentialRequest.fromJSON(JsonObject(requestJson))
 
                     val session = parsedToken[JWTClaims.Payload.subject]?.jsonPrimitive?.content?.let { getSession(it) }
                         ?: throw CredentialError(
-                            credentialRequest = credentialRequest,
+                            credentialRequest = rawCredentialRequest,
                             errorCode = CredentialErrorCode.invalid_request,
                             message = "Session not found for access token"
                         )
+
+                    // OID4VCI Draft 15+ compatibility: resolve format from session if not provided in request
+                    val credentialRequest = if (rawCredentialRequest.format == null) {
+                        val sessionFormat = session.issuanceRequests.firstOrNull()?.let { req ->
+                            getFormatByCredentialConfigurationId(req.credentialConfigurationId)
+                        } ?: throw CredentialError(
+                            credentialRequest = rawCredentialRequest,
+                            errorCode = CredentialErrorCode.invalid_request,
+                            message = "Credential format not found in request or session"
+                        )
+                        logger.info { "OID4VCI Draft 15+ compatibility: resolved format from session: $sessionFormat" }
+                        rawCredentialRequest.copy(format = sessionFormat)
+                    } else {
+                        rawCredentialRequest
+                    }
 
                     call.respond(
                         generateCredentialResponse(

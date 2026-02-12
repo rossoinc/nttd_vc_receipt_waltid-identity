@@ -253,9 +253,12 @@ open class CIProvider(
         log.debug { "CREDENTIAL REQUEST JSON -------:" }
         log.debug { Json.encodeToString(credentialRequest) }
 
+        // OID4VCI Draft 15+: format is resolved by OidcApi before reaching here, so it's guaranteed to be non-null
+        val format = credentialRequest.format!!
+
         if (session.issuanceRequests.firstOrNull()?.issuanceType != null && session.issuanceRequests.firstOrNull()!!.issuanceType == "DEFERRED") {
             return CredentialResult(
-                format = credentialRequest.format,
+                format = format,
                 credential = null,
                 credentialId = randomUUIDString()
             ).also {
@@ -263,7 +266,7 @@ open class CIProvider(
             }
         }
 
-        return when (credentialRequest.format) {
+        return when (format) {
             CredentialFormat.mso_mdoc -> runBlocking { doGenerateMDoc(credentialRequest, session) }
             else -> doGenerateCredential(credentialRequest, session)
         }
@@ -376,7 +379,7 @@ open class CIProvider(
         })
 
         return CredentialResult(
-            format = credentialRequest.format,
+            format = credentialRequest.format!!,  // Non-null: validated by caller
             credential = credential
         )
     }
@@ -510,7 +513,7 @@ open class CIProvider(
         session: IssuanceSession,
     ): BatchCredentialResponse {
         val credentialRequestFormats = batchCredentialRequest.credentialRequests
-            .map { it.format }
+            .mapNotNull { it.format }
 
         require(credentialRequestFormats.distinct().size < 2) { "Credential requests don't have the same format: ${credentialRequestFormats.joinToString { it.value }}" }
 
@@ -593,10 +596,14 @@ open class CIProvider(
                         "Session format: $credentialFormat"
             }
 
-            require(credentialFormat == credentialRequest.format) { "Format does not match" }
-            // Depending on the format, perform specific checks
+            // OID4VCI Draft 15+: format may be null (will be resolved from session)
+            if (credentialRequest.format != null) {
+                require(credentialFormat == credentialRequest.format) { "Format does not match" }
+            }
+            // Depending on the format, perform specific checks (use session format if request format is null)
+            val effectiveFormat = credentialRequest.format ?: credentialFormat
             val additionalMatches =
-                when (credentialRequest.format) {
+                when (effectiveFormat) {
                     CredentialFormat.jwt_vc_json, CredentialFormat.jwt_vc -> {
                         val types = getTypesByCredentialConfigurationId(credentialConfigurationId)
                         // same order, same elements

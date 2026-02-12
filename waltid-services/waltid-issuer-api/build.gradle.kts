@@ -112,3 +112,7 @@ ktor {
         )
     }
 }
+
+tasks.shadowJar {
+    mergeServiceFiles()  // Required for Hoplite decoders to work in fat JAR
+}

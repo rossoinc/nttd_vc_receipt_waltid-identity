@@ -19,7 +19,7 @@ private val json = Json {
 @KeepGeneratedSerializer
 @Serializable(with = CredentialRequestSerializer::class)
 data class CredentialRequest(
-    val format: CredentialFormat,
+    val format: CredentialFormat? = null,  // nullable for OID4VCI Draft 15+ compatibility
     val proof: ProofOfPossession? = null,
     @SerialName("vct") val vct: String? = null,
     @Serializable(ClaimDescriptorMapSerializer::class) val credentialSubject: Map<String, ClaimDescriptor>? = null,
@@ -38,7 +38,7 @@ data class CredentialRequest(
 
         fun forAuthorizationDetails(authorizationDetails: AuthorizationDetails, proof: ProofOfPossession?) =
             CredentialRequest(
-                authorizationDetails.format!!,
+                authorizationDetails.format,  // nullable - will be resolved from session if null
                 proof,
                 authorizationDetails.vct,
                 authorizationDetails.credentialSubject,
@@ -66,7 +66,21 @@ data class CredentialRequest(
 }
 
 internal object CredentialRequestSerializer :
-    JsonDataObjectSerializer<CredentialRequest>(CredentialRequest.generatedSerializer())
+    JsonDataObjectSerializer<CredentialRequest>(CredentialRequest.generatedSerializer()) {
+
+    // OID4VCI Draft 15+ compatibility: format field can be omitted
+    override fun transformDeserialize(element: JsonElement): JsonElement {
+        val baseTransformed = super.transformDeserialize(element)
+        val obj = baseTransformed.jsonObject.toMutableMap()
+
+        // If format is missing, add it as null so the serializer doesn't throw MissingFieldException
+        if (!obj.containsKey("format")) {
+            obj["format"] = kotlinx.serialization.json.JsonNull
+        }
+
+        return JsonObject(obj)
+    }
+}
 
 internal object CredentialRequestListSerializer : KSerializer<List<CredentialRequest>> {
     private val internalSerializer = ListSerializer(CredentialRequestSerializer)
